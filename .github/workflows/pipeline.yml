@@ -1,0 +1,58 @@
+
+name: Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t ci-cd-site .
+
+      - name: Run Docker container
+        run: docker run -d --name ci-cd-site -p 8080:80 ci-cd-site
+
+      - name: Install HTML Tidy
+        run: sudo apt-get update && sudo apt-get install -y tidy
+
+      - name: Validate HTML
+        run: tidy -q -e index.html
+
+      - name: Smoke test
+        if: always()
+        run: curl -fsS http://localhost:8080 | grep -q "GitHub:" && echo "OK"
+
+  release:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}:latest .
+          docker push ghcr.io/${{ github.repository }}:latest
+
